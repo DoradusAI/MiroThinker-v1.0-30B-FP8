@@ -1,0 +1,62 @@
+# MiroThinker-v1.0-30B-FP8 Docker Compose
+#
+# Usage (TP=2, recommended - requires 2x 24GB+ GPUs):
+#   docker compose up
+#
+# Usage (single GPU, not recommended - poor performance):
+#   SINGLE_GPU=1 docker compose up
+
+services:
+  mirothinker:
+    image: vllm/vllm-openai:v0.11.2
+    ports:
+      - "8000:8000"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HF_HOME=/root/.cache/huggingface
+      - SINGLE_GPU=${SINGLE_GPU:-}
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    shm_size: '16gb'
+    command: >
+      sh -c '
+        if [ -n "$SINGLE_GPU" ]; then
+          echo "WARNING: Single GPU mode - expect ~1-2 tok/s, 2K context max";
+          python -m vllm.entrypoints.openai.api_server
+            --model Doradus/MiroThinker-v1.0-30B-FP8
+            --host 0.0.0.0
+            --port 8000
+            --tensor-parallel-size 1
+            --max-model-len 2048
+            --max-num-seqs 4
+            --gpu-memory-utilization 0.95
+            --enforce-eager
+            --trust-remote-code;
+        else
+          python -m vllm.entrypoints.openai.api_server
+            --model Doradus/MiroThinker-v1.0-30B-FP8
+            --host 0.0.0.0
+            --port 8000
+            --tensor-parallel-size 2
+            --max-model-len 32768
+            --gpu-memory-utilization 0.90
+            --trust-remote-code
+            --enable-chunked-prefill;
+        fi
+      '
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+volumes:
+  hf_cache:
